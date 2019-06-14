@@ -2,6 +2,7 @@
 import datetime
 import dateutil.parser
 import json
+import os
 import os.path
 import pickle
 import sqlite3
@@ -9,6 +10,7 @@ import urllib3
 from googleapiclient.discovery import build
 from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import Request
+
 
 class TokenSource:
     SCOPES = ['https://www.googleapis.com/auth/photoslibrary']
@@ -38,6 +40,7 @@ class TokenSource:
             self._db.store_credentials(self.CRED_ID, pickle.dumps(creds))
         return creds
 
+
 class PhotosService:
 
     def __init__(self, tokens=None):
@@ -58,20 +61,25 @@ class PhotosService:
         filters = {}
         if start or to:
             rng_filter = {'ranges': {}}
-            if start:
-                rng_filter['ranges']['startDate'] = {'year': start.year, 'month': start.month, 'day': start.day}
-            else:
-                rng_filter['ranges']['startDate'] = {'year': 1999, 'month': 1, 'day': 1}
+            if not start:
+                start = datetime.date(1999, 1, 1)
             if not to:
                 to = datetime.datetime.now().date()
+            rng_filter['ranges']['startDate'] = {'year': start.year, 'month': start.month, 'day': start.day}
             rng_filter['ranges']['endDate'] = {'year': to.year, 'month': to.month, 'day': to.day}
             filters['dateFilter'] = rng_filter
         pagetoken = None
+
+        # Photos are returned in reversed order of creationTime.
         while True:
             resp = self._service.mediaItems().search(body={'pageSize': 25, 'filters': filters, 'pageToken': pagetoken}).execute()
-            items = resp['mediaItems']
+            print(resp)
             pagetoken = resp.get('nextPageToken', None)
+            items = resp.get('mediaItems', None)
+            if not items:
+                return
             for i in items:
+                print(i['mediaMetadata']['creationTime'])
                 yield i
             if pagetoken is None:
                 return
@@ -81,9 +89,11 @@ class PhotosService:
         """
         photo = self._service.mediaItems().get(mediaItemId=id).execute()
         rawurl = photo['baseUrl']
+        os.makedirs(path, exist_ok=True)
         p = os.path.join(path, photo['filename'])
         with open(p, 'wb') as f:
             f.write(self._http.request('GET', rawurl).data)
+
 
 class DB:
 
@@ -126,19 +136,29 @@ class DB:
             if cur.fetchone():
                 print('WARN: Photo already in store.')
                 cur.close()
-                return
+                return False
+            print('INFO: Inserting photo {}'.format(media_item['id']))
             cur.close()
 
             creation_time = int(self._dtparse.isoparse(media_item['mediaMetadata']['creationTime']).timestamp())
-            conn.cursor().execute(
-                    'INSERT INTO photos (id, creationTime, path, filename, offline) VALUES (?, ?, ?, ?, 0)',
-                    media_item['id'], creation_time, path, media_item['filename'])
+            conn.cursor().execute('INSERT INTO photos (id, creationTime, path, filename, offline) VALUES (?, ?, ?, ?, 0)', (media_item['id'], creation_time, path, media_item['filename']))
             conn.commit()
+            return True
+
+    def get_not_downloaded_photos(self):
+        """Yield photos (as [id, path]) that are not yet present locally."""
+        with self._db as conn:
+            cur = conn.cursor()
+            cur.execute('SELECT id, path, filename FROM photos WHERE offline = 0 ORDER BY creationTime ASC')
+            while True:
+                row = cur.fetchone()
+                if not row:
+                    break
+                yield row
 
     def mark_photo_downloaded(self, id):
         with self._db as conn:
-            conn.cursor().execute(
-                    'UPDATE photos SET offline = 1 WHERE id = {}'.format(id))
+            conn.cursor().execute('UPDATE photos SET offline = 1 WHERE id = {}'.format(id))
 
     def most_recent_creation_date(self):
         with self._db as conn:
@@ -147,15 +167,62 @@ class DB:
             row = cursor.fetchone()
             cursor.close()
             if row:
-                return datetime.datetime.fromtimestamp(row[0])
+                return datetime.datetime.fromtimestamp(int(row[0]))
             return datetime.datetime.fromtimestamp(0)
+
+
+class Driver:
+    """Coordinates synchronization.
+
+    1. Fetch photo metadata (list_library). This takes a long time on first try.
+    2. Check for photos not yet downloaded, download them.
+    3. Start again.
+    """
+
+    def __init__(self, db, photosservice, path_mapper=None):
+        self._db = db
+        self._svc = photosservice
+        self._path_mapper = path_mapper if path_mapper else Driver.path_from_date
+
+    def fetch_metadata(self, date_range=(None, None), start_at_recent=False):
+        """Fetch media metadata and write it to the database."""
+        if not (date_range[0] or date_range[1]):
+            if start_at_recent:
+                date_range = (self._db.most_recent_creation_date(), datetime.datetime.now())
+        print('INFO: Running starting for {}'.format(date_range))
+
+        for photo in self._svc.list_library(start=date_range[0], to=date_range[1]):
+            print('INFO: Fetched metadata for {}'.format(photo['filename']))
+            if self._db.add_online_photo(photo, self._path_mapper(photo)):
+                print('INFO: Added {} to DB'.format(photo['filename']))
+        return True
+
+    def download_photos(self):
+        """Scans database for photos not yet downloaded and downloads them."""
+        for photo in self._db.get_not_downloaded_photos():
+            (id, path, filename) = photo
+            print ('INFO: Downloading {fn} into {p}'.format(fn=filename, p=path))
+            self._svc.download_photo(id, path)
+            print('INFO: Downloading {fn} successful'.format(fn=filename))
+
+    def drive(self, date_range=(None, None), start_at_recent=True):
+        # This possibly takes a long time and it may be that the user aborts in
+        # between. It returns fast if most photos are already present locally.
+        if self.fetch_metadata(date_range, start_at_recent):
+            self.download_photos()
+
+    def path_from_date(item):
+        """By default, map photos to year/month/day directory."""
+        dt = dateutil.parser.isoparser().isoparse(item['mediaMetadata']['creationTime']).date()
+        return '{y}/{m:02d}/{d:02d}/'.format(y=dt.year, m=dt.month, d=dt.day)
+
 
 def main():
     db = DB('sq.lite')
     s = PhotosService(tokens=TokenSource(db=db))
-    items = s.list_library(to=datetime.date(2019, 7, 7))
-    for i in items:
-        db.add_online_photo(i, 'local')
+    d = Driver(db, s)
+    d.drive()
+
 
 if __name__ == '__main__':
     main()
