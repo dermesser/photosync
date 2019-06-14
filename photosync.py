@@ -1,4 +1,5 @@
 
+import arguments
 import datetime
 import dateutil.parser
 import json
@@ -103,14 +104,14 @@ class PhotosService:
             if pagetoken is None:
                 return
 
-    def download_photo(self, id, path):
-        """Download a photo and store it under its file name in the directory `path`.
+    def download_item(self, id, path):
+        """Download a item and store it under its file name in the directory `path`.
         """
-        photo = self._service.mediaItems().get(mediaItemId=id).execute()
-        rawurl = photo['baseUrl']
+        item = self._service.mediaItems().get(mediaItemId=id).execute()
+        rawurl = item['baseUrl']
         rawurl = '{url}=d'.format(url=rawurl)
         os.makedirs(path, exist_ok=True)
-        p = os.path.join(path, photo['filename'])
+        p = os.path.join(path, item['filename'])
         with open(p, 'wb') as f:
             f.write(self._http.request('GET', rawurl).data)
 
@@ -124,8 +125,9 @@ class DB:
 
     def initdb(self):
         cur = self._db.cursor()
-        cur.execute('CREATE TABLE IF NOT EXISTS photos (id TEXT PRIMARY KEY, creationTime TEXT, path TEXT, filename TEXT, offline INTEGER)')
-        cur.execute('CREATE TABLE IF NOT EXISTS transactions (id TEXT, type TEXT, time INTEGER, path TEXT, filename TEXT)')
+        cur.execute('CREATE TABLE IF NOT EXISTS items (id TEXT PRIMARY KEY, creationTime TEXT, path TEXT, mimetype \
+                TEXT, filename TEXT, video INTEGER, offline INTEGER)')
+        cur.execute('CREATE TABLE IF NOT EXISTS transactions (id TEXT, type TEXT, time INTEGER)')
         cur.execute('CREATE TABLE IF NOT EXISTS oauth (id TEXT PRIMARY KEY, credentials BLOB)')
         self._db.commit()
 
@@ -149,102 +151,163 @@ class DB:
                 return row[0]
             return None
 
-    def add_online_photo(self, media_item, path):
+    def add_online_item(self, media_item, path):
         with self._db as conn:
             cur = conn.cursor()
-            cur.execute('SELECT id FROM photos WHERE id = "{}"'.format(media_item['id']))
+            cur.execute('SELECT id FROM items WHERE id = "{}"'.format(media_item['id']))
             if cur.fetchone():
                 log('INFO', 'Photo already in store.')
                 cur.close()
                 return False
-            log('INFO', 'Inserting photo {}'.format(media_item['id']))
+            log('INFO', 'Inserting item {}'.format(media_item['id']))
             cur.close()
 
             creation_time = int(self._dtparse.isoparse(media_item['mediaMetadata']['creationTime']).timestamp())
-            conn.cursor().execute('INSERT INTO photos (id, creationTime, path, filename, offline) VALUES (?, ?, ?, ?, 0)', (media_item['id'], creation_time, path, media_item['filename']))
-            conn.commit()
-            return True
+            is_video = 1 if 'video' in media_item['mediaMetadata'] else 0
+            conn.cursor().execute('INSERT INTO items (id, creationTime, path, mimetype, filename, video, offline) VALUES (?, ?, ?, ?, ?, ?, 0)', (media_item['id'], creation_time, path, media_item['mimeType'], media_item['filename'], is_video))
+        self.record_transaction(media_item['id'], 'ADD')
+        return True
 
-    def get_not_downloaded_photos(self):
-        """Yield photos (as [id, path]) that are not yet present locally."""
+    def get_not_downloaded_items(self):
+        """Generate items (as [id, path, filename]) that are not yet present locally."""
         with self._db as conn:
             cur = conn.cursor()
-            cur.execute('SELECT id, path, filename FROM photos WHERE offline = 0 ORDER BY creationTime ASC')
+            cur.execute('SELECT id, path, filename FROM items WHERE offline = 0 ORDER BY creationTime ASC')
             while True:
                 row = cur.fetchone()
                 if not row:
                     break
                 yield row
 
-    def mark_photo_downloaded(self, id):
+    def mark_item_downloaded(self, id):
         with self._db as conn:
-            conn.cursor().execute('UPDATE photos SET offline = 1 WHERE id = ?', (id,))
+            conn.cursor().execute('UPDATE items SET offline = 1 WHERE id = ?', (id,))
+        self.record_transaction(id, 'DOWNLOAD')
 
-    def most_recent_creation_date(self):
+    def existing_items_range(self):
         with self._db as conn:
             cursor = conn.cursor()
-            cursor.execute('SELECT creationTime FROM photos ORDER BY creationTime DESC LIMIT 1')
-            row = cursor.fetchone()
-            cursor.close()
-            if row:
-                return datetime.datetime.fromtimestamp(int(row[0]))
-            return datetime.datetime.fromtimestamp(0)
+            cursor.execute('SELECT creationTime FROM items ORDER BY creationTime DESC LIMIT 1')
+            newest = cursor.fetchone()
+            cursor.execute('SELECT creationTime FROM items ORDER BY creationTime ASC LIMIT 1')
+            oldest = cursor.fetchone()
+
+            # Safe defaults that will lead to all items being selected
+            old_default = datetime.datetime.now()
+            new_default = datetime.datetime.fromtimestamp(0)
+            return (
+                datetime.datetime.fromtimestamp(int(oldest[0])) if oldest else old_default,
+                datetime.datetime.fromtimestamp(int(newest[0])) if newest else new_default
+            )
+
+    def record_transaction(self, id, typ):
+        """Record an event in the transaction log.
+
+        typ should be one of 'ADD', 'DOWNLOAD'.
+        """
+        with self._db as conn:
+            cursor = conn.cursor()
+            cursor.execute('INSERT INTO transactions (id, type, time) VALUES (?, ?, ?)', (id, typ, int(datetime.datetime.now().timestamp())))
 
 
 class Driver:
     """Coordinates synchronization.
 
-    1. Fetch photo metadata (list_library). This takes a long time on first try.
-    2. Check for photos not yet downloaded, download them.
+    1. Fetch item metadata (list_library). This takes a long time on first try.
+    2. Check for items not yet downloaded, download them.
     3. Start again.
     """
 
-    def __init__(self, db, photosservice, path_mapper=None):
+    def __init__(self, db, photosservice, root='', path_mapper=None):
+        self._root = root
         self._db = db
         self._svc = photosservice
         self._path_mapper = path_mapper if path_mapper else Driver.path_from_date
 
-    def fetch_metadata(self, date_range=(None, None), start_at_recent=False):
+    def fetch_metadata(self, date_range=(None, None), window_heuristic=False):
         """Fetch media metadata and write it to the database."""
+
+        # First, figure out which ranges we need to fetch.
+        ranges = [date_range]
         if not (date_range[0] or date_range[1]):
-            if start_at_recent:
-                date_range = (self._db.most_recent_creation_date(), datetime.datetime.now())
+            if window_heuristic:
+                (oldest, newest) = self._db.existing_items_range()
+                # Special case where no previous items exist.
+                if newest == datetime.datetime.fromtimestamp(0):
+                    ranges = [(datetime.datetime.fromtimestamp(0), datetime.datetime.now())]
+                else:
+                    # Fetch from the time before the oldest item and after the newest item.
+                    # This will fail if items are uploaded with a creation
+                    # date in between existing items.
+                    ranges = [
+                        (datetime.datetime.fromtimestamp(0), oldest),
+                        (newest, datetime.datetime.now())
+                    ]
+            else:
+                ranges = [(datetime.datetime.fromtimestamp(0), datetime.datetime.now())]
+
         log('INFO', 'Running starting for {}'.format(date_range))
 
-        for photo in self._svc.list_library(start=date_range[0], to=date_range[1]):
-            log('INFO', 'Fetched metadata for {}'.format(photo['filename']))
-            if self._db.add_online_photo(photo, self._path_mapper(photo)):
-                log('INFO', 'Added {} to DB'.format(photo['filename']))
+        for rng in ranges:
+            for item in self._svc.list_library(start=rng[0], to=rng[1]):
+                log('INFO', 'Fetched metadata for {}'.format(item['filename']))
+                if self._db.add_online_item(item, self._path_mapper(item)):
+                    log('INFO', 'Added {} to DB'.format(item['filename']))
         return True
 
-    def download_photos(self):
-        """Scans database for photos not yet downloaded and downloads them."""
-        for photo in self._db.get_not_downloaded_photos():
-            (id, path, filename) = photo
+    def download_items(self):
+        """Scans database for items not yet downloaded and downloads them."""
+        for item in self._db.get_not_downloaded_items():
+            (id, path, filename) = item
+            path = os.path.join(self._root, path)
             log('INFO', 'Downloading {fn} into {p}'.format(fn=filename, p=path))
-            self._svc.download_photo(id, path)
+            self._svc.download_item(id, path)
             log('INFO', 'Downloading {fn} successful'.format(fn=filename))
-            self._db.mark_photo_downloaded(id)
+            self._db.mark_item_downloaded(id)
 
-    def drive(self, date_range=(None, None), start_at_recent=True):
-        """First, download all metadata since most recently fetched photo.
+    def drive(self, date_range=(None, None), window_heuristic=True):
+        """First, download all metadata since most recently fetched item.
         Then, download content."""
         # This possibly takes a long time and it may be that the user aborts in
-        # between. It returns fast if most photos are already present locally.
-        if self.fetch_metadata(date_range, start_at_recent):
-            self.download_photos()
+        # between. It returns fast if most items are already present locally.
+        # window_heuristic asks the metadata fetching logic to only fetch
+        # items older than the oldest or newer than the newest item, which is
+        # what we want for updating the items library.
+        if self.fetch_metadata(date_range, window_heuristic):
+            self.download_items()
 
     def path_from_date(item):
-        """By default, map photos to year/month/day directory."""
+        """By default, map items to year/month/day directory."""
         dt = dateutil.parser.isoparser().isoparse(item['mediaMetadata']['creationTime']).date()
         return '{y}/{m:02d}/{d:02d}/'.format(y=dt.year, m=dt.month, d=dt.day)
 
 
+class Main(arguments.BaseArguments):
+    def __init__(self):
+        doc = '''
+        Download photos and videos from Google Photos.
+
+        Usage:
+            photosync.py [options]
+
+        Options:
+            -h --help       Show this screen
+            -d --dir=<dir>  Root directory; where to download photos and store the database.
+        '''
+        super(arguments.BaseArguments, self).__init__(doc=doc)
+        self.dir = self.dir if self.dir else '.'
+
+    def main(self):
+        print(self.dir)
+        db = DB(os.path.join(self.dir, 'sync.db'))
+        s = PhotosService(tokens=TokenSource(db=db))
+        d = Driver(db, s, root=self.dir)
+        d.drive(date_range=(datetime.datetime.fromtimestamp(0), datetime.datetime.now()))
+
+
 def main():
-    db = DB('photosync.db')
-    s = PhotosService(tokens=TokenSource(db=db))
-    d = Driver(db, s)
-    d.drive()
+    Main().main()
+
 
 if __name__ == '__main__':
     main()

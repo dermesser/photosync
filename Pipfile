@@ -10,6 +10,10 @@ google-api-python-client = "*"
 google-auth-httplib2 = "*"
 google-auth-oauthlib = "*"
 python-dateutil = "*"
+arguments = "*"
+future = "*"
+pyyaml = "*"
+consoleprinter = "*"
 
 [requires]
 python_version = "3.7"
