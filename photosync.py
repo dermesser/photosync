@@ -293,16 +293,20 @@ class Main(arguments.BaseArguments):
         Options:
             -h --help       Show this screen
             -d --dir=<dir>  Root directory; where to download photos and store the database.
+            --all           Synchronize *all* photos instead of just before the oldest/after the newest photo. Needed if you have uploaded photos somewhere in the middle.
         '''
         super(arguments.BaseArguments, self).__init__(doc=doc)
         self.dir = self.dir if self.dir else '.'
 
     def main(self):
-        print(self.dir)
+        # TODO: --resync, to inspect the local filesystem for vanished files.
         db = DB(os.path.join(self.dir, 'sync.db'))
         s = PhotosService(tokens=TokenSource(db=db))
         d = Driver(db, s, root=self.dir)
-        d.drive(date_range=(datetime.datetime.fromtimestamp(0), datetime.datetime.now()))
+        if self.all:
+            d.drive(window_heuristic=False)
+        else:
+            d.drive(window_heuristic=True)
 
 
 def main():
