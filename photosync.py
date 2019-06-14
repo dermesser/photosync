@@ -11,6 +11,16 @@ from googleapiclient.discovery import build
 from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import Request
 
+PROD = False
+TRACE = True
+
+def log(level, msg):
+    if PROD:
+        return
+    if level == 'TRACE' and not TRACE:
+        return
+    print(level, "::", msg)
+
 
 class TokenSource:
     """Return OAuth token for PhotosService to use.
@@ -82,13 +92,12 @@ class PhotosService:
         # Photos are returned in reversed order of creationTime.
         while True:
             resp = self._service.mediaItems().search(body={'pageSize': 25, 'filters': filters, 'pageToken': pagetoken}).execute()
-            print(resp)
             pagetoken = resp.get('nextPageToken', None)
             items = resp.get('mediaItems', None)
             if not items:
                 return
             for i in items:
-                print(i['mediaMetadata']['creationTime'])
+                log('TRACE', i['mediaMetadata']['creationTime'])
                 yield i
             if pagetoken is None:
                 return
@@ -144,10 +153,10 @@ class DB:
             cur = conn.cursor()
             cur.execute('SELECT id FROM photos WHERE id = "{}"'.format(media_item['id']))
             if cur.fetchone():
-                print('WARN: Photo already in store.')
+                log('INFO', 'Photo already in store.')
                 cur.close()
                 return False
-            print('INFO: Inserting photo {}'.format(media_item['id']))
+            log('INFO', 'Inserting photo {}'.format(media_item['id']))
             cur.close()
 
             creation_time = int(self._dtparse.isoparse(media_item['mediaMetadata']['creationTime']).timestamp())
@@ -199,21 +208,21 @@ class Driver:
         if not (date_range[0] or date_range[1]):
             if start_at_recent:
                 date_range = (self._db.most_recent_creation_date(), datetime.datetime.now())
-        print('INFO: Running starting for {}'.format(date_range))
+        log('INFO', 'Running starting for {}'.format(date_range))
 
         for photo in self._svc.list_library(start=date_range[0], to=date_range[1]):
-            print('INFO: Fetched metadata for {}'.format(photo['filename']))
+            log('INFO', 'Fetched metadata for {}'.format(photo['filename']))
             if self._db.add_online_photo(photo, self._path_mapper(photo)):
-                print('INFO: Added {} to DB'.format(photo['filename']))
+                log('INFO', 'Added {} to DB'.format(photo['filename']))
         return True
 
     def download_photos(self):
         """Scans database for photos not yet downloaded and downloads them."""
         for photo in self._db.get_not_downloaded_photos():
             (id, path, filename) = photo
-            print ('INFO: Downloading {fn} into {p}'.format(fn=filename, p=path))
+            log ('INFO', 'Downloading {fn} into {p}'.format(fn=filename, p=path))
             self._svc.download_photo(id, path)
-            print('INFO: Downloading {fn} successful'.format(fn=filename))
+            log('INFO', 'Downloading {fn} successful'.format(fn=filename))
             self._db.mark_photo_downloaded(id)
 
     def drive(self, date_range=(None, None), start_at_recent=True):
@@ -231,11 +240,10 @@ class Driver:
 
 
 def main():
-    db = DB('sq.lite')
+    db = DB('photosync.db')
     s = PhotosService(tokens=TokenSource(db=db))
     d = Driver(db, s)
     d.drive()
-
 
 if __name__ == '__main__':
     main()
