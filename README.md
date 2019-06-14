@@ -19,9 +19,29 @@ organize photos in directories like `year/month/day/` (numerically, 0-padded), b
 mapping photos to directories and override it by setting the `path_mapper` argument in the `Driver` constructor called
 from `Main.main()`.
 
-Albums are currently ignored. Videos are supposed to work, but I haven't yet seen the API return them :(
+Note that this (obviously) takes a while for large libraries. But you can always stop photosync and restart it later;
+without the `--all` option, it will resume synchronization where it left off.
+
+Albums are currently ignored. Videos are downloaded just like photos.
 
 ## Install & Use
+
+First, acquire a client secret. This is necessary because this is an open source project, and I don't want client
+credentials associated with my account floating around in the wild. Also, the daily limit for Photos API calls is at
+10'000, so it wouldn't work for a nontrivial number of users anyway.
+
+For this,
+
+1. go to https://console.developers.google.com.
+1. Go to the APIs page and enable the Google Photos API.
+1. Set up the OAuth consent screen (otherwise Google will nag you during credentials creation to do it).
+1. Then go to the *Credentials* page and create a new client ID (type `other`). Download the JSON file using the
+   download button at the right hand side.
+1. Save the downloaded JSON file and put it somewhere, for example in your photos directory. Pass the path to the file
+   to photosync using the `--creds` argument. By default, photosync will look for a file called `clientsecret.json` in
+   the current directory.
+
+Once you have gone through the hassle of obtaining the client secret, you can start downloading your photos.
 
 1. Clone this repository to a convenient place: `git clone https://github.com/dermesser/photosync` or `hg clone
    git+https://github.com/dermesser/photosync`.
