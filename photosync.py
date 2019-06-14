@@ -93,7 +93,7 @@ class PhotosService:
 
         # Photos are returned in reversed order of creationTime.
         while True:
-            resp = self._service.mediaItems().search(body={'pageSize': 25, 'filters': filters, 'pageToken': pagetoken}).execute()
+            resp = self._service.mediaItems().search(body={'pageSize': 75, 'filters': filters, 'pageToken': pagetoken}).execute()
             pagetoken = resp.get('nextPageToken', None)
             items = resp.get('mediaItems', None)
             if not items:
@@ -294,17 +294,20 @@ class Main(arguments.BaseArguments):
             photosync.py [options]
 
         Options:
-            -h --help       Show this screen
-            -d --dir=<dir>  Root directory; where to download photos and store the database.
-            --all           Synchronize *all* photos instead of just before the oldest/after the newest photo. Needed if you have uploaded photos somewhere in the middle.
+            -h --help                   Show this screen
+            -d --dir=<dir>              Root directory; where to download photos and store the database.
+            --creds=clientsecret.json   Path to the client credentials JSON file. Defaults to
+            --all                       Synchronize *all* photos instead of just before the oldest/after the newest photo. Needed if you have uploaded photos somewhere in the middle.
         '''
         super(arguments.BaseArguments, self).__init__(doc=doc)
-        self.dir = self.dir if self.dir else '.'
+        self.dir = self.dir or '.'
+        self.creds = self.creds or 'clientsecret.json'
 
     def main(self):
         # TODO: --resync, to inspect the local filesystem for vanished files.
+        print(self.dir, self.creds)
         db = DB(os.path.join(self.dir, 'sync.db'))
-        s = PhotosService(tokens=TokenSource(db=db))
+        s = PhotosService(tokens=TokenSource(db=db, clientsecret=self.creds))
         d = Driver(db, s, root=self.dir)
         if self.all:
             d.drive(window_heuristic=False)
