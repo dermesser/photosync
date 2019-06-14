@@ -106,6 +106,15 @@ class PhotosService:
 
     def download_item(self, id, path, video):
         """Download a item and store it under its file name in the directory `path`.
+
+        First, the item is queried again in order to obtain the base URL (which
+        is not permanent). Then, the base URL is used to fetch the image/video
+        bytes.
+
+        Arguments:
+            id: Media ID of item.
+            path: Directory where to store it.
+            video: Boolean, whether item is video.
         """
         item = self._service.mediaItems().get(mediaItemId=id).execute()
         rawurl = item['baseUrl']
