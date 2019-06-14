@@ -305,7 +305,6 @@ class Main(arguments.BaseArguments):
 
     def main(self):
         # TODO: --resync, to inspect the local filesystem for vanished files.
-        print(self.dir, self.creds)
         db = DB(os.path.join(self.dir, 'sync.db'))
         s = PhotosService(tokens=TokenSource(db=db, clientsecret=self.creds))
         d = Driver(db, s, root=self.dir)
