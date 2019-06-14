@@ -13,6 +13,15 @@ from google.auth.transport.requests import Request
 
 
 class TokenSource:
+    """Return OAuth token for PhotosService to use.
+
+    Please acquire your own client secret and put it into the clientsecret.json
+    (or any other file) in the directory you are running this program from.
+
+    On first use, this will prompt you for authorization on stdin. On subsequent
+    invocations, it will use the token from the database and refresh it when
+    needed.
+    """
     SCOPES = ['https://www.googleapis.com/auth/photoslibrary']
     CRED_ID = 'installed.main'
 
@@ -89,6 +98,7 @@ class PhotosService:
         """
         photo = self._service.mediaItems().get(mediaItemId=id).execute()
         rawurl = photo['baseUrl']
+        rawurl = '{url}=d'.format(url=rawurl)
         os.makedirs(path, exist_ok=True)
         p = os.path.join(path, photo['filename'])
         with open(p, 'wb') as f:
@@ -158,7 +168,7 @@ class DB:
 
     def mark_photo_downloaded(self, id):
         with self._db as conn:
-            conn.cursor().execute('UPDATE photos SET offline = 1 WHERE id = {}'.format(id))
+            conn.cursor().execute('UPDATE photos SET offline = 1 WHERE id = ?', (id,))
 
     def most_recent_creation_date(self):
         with self._db as conn:
@@ -204,8 +214,11 @@ class Driver:
             print ('INFO: Downloading {fn} into {p}'.format(fn=filename, p=path))
             self._svc.download_photo(id, path)
             print('INFO: Downloading {fn} successful'.format(fn=filename))
+            self._db.mark_photo_downloaded(id)
 
     def drive(self, date_range=(None, None), start_at_recent=True):
+        """First, download all metadata since most recently fetched photo.
+        Then, download content."""
         # This possibly takes a long time and it may be that the user aborts in
         # between. It returns fast if most photos are already present locally.
         if self.fetch_metadata(date_range, start_at_recent):
