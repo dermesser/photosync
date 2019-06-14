@@ -104,12 +104,15 @@ class PhotosService:
             if pagetoken is None:
                 return
 
-    def download_item(self, id, path):
+    def download_item(self, id, path, video):
         """Download a item and store it under its file name in the directory `path`.
         """
         item = self._service.mediaItems().get(mediaItemId=id).execute()
         rawurl = item['baseUrl']
-        rawurl = '{url}=d'.format(url=rawurl)
+        if video:
+            rawurl = '{url}=dv'.format(url=rawurl)
+        else:
+            rawurl = '{url}=d'.format(url=rawurl)
         os.makedirs(path, exist_ok=True)
         p = os.path.join(path, item['filename'])
         with open(p, 'wb') as f:
@@ -169,10 +172,10 @@ class DB:
         return True
 
     def get_not_downloaded_items(self):
-        """Generate items (as [id, path, filename]) that are not yet present locally."""
+        """Generate items (as [id, path, filename, is_video]) that are not yet present locally."""
         with self._db as conn:
             cur = conn.cursor()
-            cur.execute('SELECT id, path, filename FROM items WHERE offline = 0 ORDER BY creationTime ASC')
+            cur.execute('SELECT id, path, filename, video FROM items WHERE offline = 0 ORDER BY creationTime ASC')
             while True:
                 row = cur.fetchone()
                 if not row:
@@ -258,10 +261,10 @@ class Driver:
     def download_items(self):
         """Scans database for items not yet downloaded and downloads them."""
         for item in self._db.get_not_downloaded_items():
-            (id, path, filename) = item
+            (id, path, filename, is_video) = item
             path = os.path.join(self._root, path)
             log('INFO', 'Downloading {fn} into {p}'.format(fn=filename, p=path))
-            self._svc.download_item(id, path)
+            self._svc.download_item(id, path, is_video)
             log('INFO', 'Downloading {fn} successful'.format(fn=filename))
             self._db.mark_item_downloaded(id)
 
