@@ -14,12 +14,13 @@ from google.auth.transport.requests import Request
 PROD = False
 TRACE = True
 
+
 def log(level, msg):
     if PROD:
         return
     if level == 'TRACE' and not TRACE:
         return
-    print(level, "::", msg)
+    print (level, "::", msg)
 
 
 class TokenSource:
@@ -220,7 +221,7 @@ class Driver:
         """Scans database for photos not yet downloaded and downloads them."""
         for photo in self._db.get_not_downloaded_photos():
             (id, path, filename) = photo
-            log ('INFO', 'Downloading {fn} into {p}'.format(fn=filename, p=path))
+            log('INFO', 'Downloading {fn} into {p}'.format(fn=filename, p=path))
             self._svc.download_photo(id, path)
             log('INFO', 'Downloading {fn} successful'.format(fn=filename))
             self._db.mark_photo_downloaded(id)
