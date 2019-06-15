@@ -1,13 +1,15 @@
 
-import arguments
 import datetime
-import dateutil.parser
 import json
 import os
 import os.path
 import pickle
 import sqlite3
-import urllib3
+
+import arguments
+import dateutil.parser
+import httplib2
+
 from googleapiclient.discovery import build
 from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import Request
@@ -16,11 +18,13 @@ PROD = False
 TRACE = True
 
 
-def log(level, msg):
+def log(level, msg, *args):
     if PROD:
         return
     if level == 'TRACE' and not TRACE:
         return
+    if args:
+        msg = msg.format(*args)
     print (level, "::", msg)
 
 
@@ -67,7 +71,7 @@ class PhotosService:
     def __init__(self, tokens=None):
         self._token_source = tokens
         self._service = build('photoslibrary', 'v1', credentials=tokens.creds())
-        self._http = urllib3.PoolManager()
+        self._http = httplib2.Http()
 
     def list_library(self, start=None, to=None):
         """Yields items from the library.
@@ -104,29 +108,43 @@ class PhotosService:
             if pagetoken is None:
                 return
 
-    def download_item(self, id, path, video):
-        """Download a item and store it under its file name in the directory `path`.
-
-        First, the item is queried again in order to obtain the base URL (which
-        is not permanent). Then, the base URL is used to fetch the image/video
-        bytes.
+    def download_items(self, items):
+        """Download multiple items.
 
         Arguments:
-            id: Media ID of item.
-            path: Directory where to store it.
-            video: Boolean, whether item is video.
-        """
-        item = self._service.mediaItems().get(mediaItemId=id).execute()
-        rawurl = item['baseUrl']
-        if video:
-            rawurl = '{url}=dv'.format(url=rawurl)
-        else:
-            rawurl = '{url}=d'.format(url=rawurl)
-        os.makedirs(path, exist_ok=True)
-        p = os.path.join(path, item['filename'])
-        with open(p, 'wb') as f:
-            f.write(self._http.request('GET', rawurl).data)
+            items: List of (id, path, video) tuples.
 
+        Returns:
+            List of IDs that were successfully downloaded.
+        """
+        ids = list(map(lambda i: i[0], items))
+        media_items = self._service.mediaItems().batchGet(mediaItemIds=ids).execute()
+        ok = []
+        i = -1
+        for result in media_items['mediaItemResults']:
+            i += 1
+            if 'status' in result:
+                log('WARN', 'Could not query info for {}: {}'.format(items[i][0], result['status']))
+                continue
+            item = result['mediaItem']
+            rawurl = item['baseUrl']
+            if 'video' in item['mediaMetadata']:
+                rawurl += '=dv'
+            else:
+                rawurl += '=d'
+            os.makedirs(items[i][1], exist_ok=True)
+            p = os.path.join(items[i][1], item['filename'])
+            log('INFO', 'Downloading {}', p)
+            resp, cont = self._http.request(rawurl, 'GET')
+            if resp.status != 200:
+                log('WARN', 'HTTP item download failed: {} {}'.format(resp.status, resp.reason))
+                continue
+            with open(p, 'wb') as f:
+                f.write(cont)
+            size = len(cont) / (1024. * 1024.)
+            log('INFO', 'Downloaded {} successfully ({:.2f} MiB)', p, size)
+            ok.append(item['id'])
+        return ok
 
 class DB:
 
@@ -191,10 +209,11 @@ class DB:
                     break
                 yield row
 
-    def mark_item_downloaded(self, id):
+    def mark_items_downloaded(self, ids):
         with self._db as conn:
-            conn.cursor().execute('UPDATE items SET offline = 1 WHERE id = ?', (id,))
-        self.record_transaction(id, 'DOWNLOAD')
+            for id in ids:
+                conn.cursor().execute('UPDATE items SET offline = 1 WHERE id = ?', (id,))
+                self.record_transaction(id, 'DOWNLOAD')
 
     def existing_items_range(self):
         with self._db as conn:
@@ -269,13 +288,21 @@ class Driver:
 
     def download_items(self):
         """Scans database for items not yet downloaded and downloads them."""
+        chunk = []
+        chunksize = 16
         for item in self._db.get_not_downloaded_items():
             (id, path, filename, is_video) = item
             path = os.path.join(self._root, path)
-            log('INFO', 'Downloading {fn} into {p}'.format(fn=filename, p=path))
-            self._svc.download_item(id, path, is_video)
-            log('INFO', 'Downloading {fn} successful'.format(fn=filename))
-            self._db.mark_item_downloaded(id)
+            chunk.append((id, path, is_video))
+
+            if len(chunk) > chunksize:
+                ok = self._svc.download_items(chunk)
+                self._db.mark_items_downloaded(ok)
+                chunk = []
+
+        if len(chunk) > 0:
+            ok = self._svc.download_items(chunk)
+            self._db.mark_items_downloaded(ok)
 
     def drive(self, date_range=(None, None), window_heuristic=True):
         """First, download all metadata since most recently fetched item.
