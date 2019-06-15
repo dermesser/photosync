@@ -146,6 +146,7 @@ class PhotosService:
             ok.append(item['id'])
         return ok
 
+
 class DB:
 
     def __init__(self, path):
@@ -198,21 +199,21 @@ class DB:
         self.record_transaction(media_item['id'], 'ADD')
         return True
 
-    def get_not_downloaded_items(self):
+    def get_items_by_downloaded(self, downloaded=False):
         """Generate items (as [id, path, filename, is_video]) that are not yet present locally."""
         with self._db as conn:
             cur = conn.cursor()
-            cur.execute('SELECT id, path, filename, video FROM items WHERE offline = 0 ORDER BY creationTime ASC')
+            cur.execute('SELECT id, path, filename, video FROM items WHERE offline = ? ORDER BY creationTime ASC', (1 if downloaded else 0,))
             while True:
                 row = cur.fetchone()
                 if not row:
                     break
                 yield row
 
-    def mark_items_downloaded(self, ids):
+    def mark_items_downloaded(self, ids, downloaded=True):
         with self._db as conn:
             for id in ids:
-                conn.cursor().execute('UPDATE items SET offline = 1 WHERE id = ?', (id,))
+                conn.cursor().execute('UPDATE items SET offline = ? WHERE id = ?', (1 if downloaded else 0, id))
                 self.record_transaction(id, 'DOWNLOAD')
 
     def existing_items_range(self):
@@ -288,21 +289,27 @@ class Driver:
 
     def download_items(self):
         """Scans database for items not yet downloaded and downloads them."""
+        retry = []
         chunk = []
         chunksize = 16
-        for item in self._db.get_not_downloaded_items():
+        for item in self._db.get_items_by_downloaded(False):
             (id, path, filename, is_video) = item
             path = os.path.join(self._root, path)
             chunk.append((id, path, is_video))
 
             if len(chunk) > chunksize:
                 ok = self._svc.download_items(chunk)
+                wantids = list(map(lambda i: i[0], chunk))
                 self._db.mark_items_downloaded(ok)
                 chunk = []
+                retry.extend(set(wantids) ^ set(ok))
 
-        if len(chunk) > 0:
+        if len(chunk) + len(retry) > 0:
+            chunk.extend(retry)
             ok = self._svc.download_items(chunk)
             self._db.mark_items_downloaded(ok)
+            if len(ok) < len(chunk):
+                log('WARN', 'Could not download {} items. Please try again later (photosync will automatically retry these)', len(chunk) - len(ok))
 
     def drive(self, date_range=(None, None), window_heuristic=True):
         """First, download all metadata since most recently fetched item.
@@ -315,8 +322,31 @@ class Driver:
         if self.fetch_metadata(date_range, window_heuristic):
             self.download_items()
 
+    def find_vanished_items(self, dir):
+        """Checks if all photos that are supposed to be downloaded are still present.
+
+        Marks them for download otherwise, meaning that they will be downloaded later.
+        """
+        found = 0
+        for (id, path, filename, video) in self._db.get_items_by_downloaded(downloaded=True):
+            path = os.path.join(dir, path, filename)
+            try:
+                info = os.stat(path)
+            except FileNotFoundError:
+                log('INFO', 'Found vanished item at {}; marking for download', path)
+                found += 1
+                self._db.mark_items_downloaded([id], downloaded=False)
+        if found > 0:
+            log('WARN', 'Found {} vanished items. Reattempting download now...', found)
+            return True
+        return False
+
+
     def path_from_date(item):
-        """By default, map items to year/month/day directory."""
+        """By default, map items to year/month/day directory.
+
+        Important: Omits the --dir relative directory (self._root).
+        """
         dt = dateutil.parser.isoparser().isoparse(item['mediaMetadata']['creationTime']).date()
         return '{y}/{m:02d}/{d:02d}/'.format(y=dt.year, m=dt.month, d=dt.day)
 
@@ -332,8 +362,9 @@ class Main(arguments.BaseArguments):
         Options:
             -h --help                   Show this screen
             -d --dir=<dir>              Root directory; where to download photos and store the database.
-            --creds=clientsecret.json   Path to the client credentials JSON file. Defaults to
             --all                       Synchronize *all* photos instead of just before the oldest/after the newest photo. Needed if you have uploaded photos somewhere in the middle.
+            --creds=clientsecret.json   Path to the client credentials JSON file. Defaults to
+            --resync                    Check local filesystem for files that should be downloaded but are not there (anymore).
         '''
         super(arguments.BaseArguments, self).__init__(doc=doc)
         self.dir = self.dir or '.'
@@ -344,6 +375,12 @@ class Main(arguments.BaseArguments):
         db = DB(os.path.join(self.dir, 'sync.db'))
         s = PhotosService(tokens=TokenSource(db=db, clientsecret=self.creds))
         d = Driver(db, s, root=self.dir)
+
+        if self.resync:
+            if d.find_vanished_items(self.dir):
+                d.download_items()
+                log('WARN', 'Finished downloading missing items.')
+            return
         if self.all:
             d.drive(window_heuristic=False)
         else:
