@@ -55,3 +55,15 @@ Once you have gone through the hassle of obtaining the client secret, you can st
 
 Consult the help text printed by the last command. Usually you will need to set `--dir` so that your photos don't end up
 in the repository.
+
+## Troubleshooting
+
+* I have seen `Invalid media item ID.` errors for valid-looking media item IDs. This happened to a handful of photos,
+  all from the same day. The media item IDs all started with the same prefix which was different than the shared prefix of
+  all other media item IDs (all IDs from one account usually start with the same 4-6 characters). I'm not sure why the
+  API at one point returned those.
+  * To clean this up, remove the invalid IDs from the database (`sqlite3 sync.db "DELETE FROM items WHERE id LIKE
+    'wrongprefix%'"`) after checking that only a small number of items has this kind of ID (`sqlite3 sync.db "SELECT *
+    FROM items WHERE id LIKE 'wrongprefix%'"`).
+  * Re-fetch metadata for the affected days: `python3 photosync.py --dir=.../directory --all --dates=2012-12-12:2012-12-14`
+    (for example)

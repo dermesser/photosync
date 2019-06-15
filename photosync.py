@@ -73,6 +73,10 @@ class PhotosService:
         self._service = build('photoslibrary', 'v1', credentials=tokens.creds())
         self._http = httplib2.Http()
 
+    def get_item(self, id):
+        item = self._service.mediaItems().get(mediaItemId=id).execute()
+        return item
+
     def list_library(self, start=None, to=None):
         """Yields items from the library.
 
@@ -299,13 +303,18 @@ class Driver:
 
             if len(chunk) > chunksize:
                 ok = self._svc.download_items(chunk)
-                wantids = list(map(lambda i: i[0], chunk))
                 self._db.mark_items_downloaded(ok)
+                wantids = set(map(lambda i: i[0], chunk))
+                missing = wantids ^ set(ok)
+                for item in chunk:
+                    if item[0] in missing:
+                        retry.append(item)
                 chunk = []
-                retry.extend(set(wantids) ^ set(ok))
 
-        if len(chunk) + len(retry) > 0:
-            chunk.extend(retry)
+        chunk.extend(retry)
+        n = chunksize
+        smalls = [chunk[i:i + n] for i in range(0, len(chunk), n)]
+        for chunk in smalls:
             ok = self._svc.download_items(chunk)
             self._db.mark_items_downloaded(ok)
             if len(ok) < len(chunk):
@@ -354,7 +363,21 @@ class Driver:
 class Main(arguments.BaseArguments):
     def __init__(self):
         doc = '''
-        Download photos and videos from Google Photos.
+        Download photos and videos from Google Photos. Without any arguments, photosync will check for
+        new photos and download all photos that are marked as not yet downloaded as well as the new ones.
+
+        In general, photosync works like this:
+
+        * Download metadata for all items (initial run, or --all), or items in
+          a specified date range (--dates), or before the oldest and after the
+          newest item (default)
+            -> items are marked as "online", i.e. not yet downloaded.
+        * Check database for all items that are "online" and start download them.
+        * Exit.
+
+        This means that if you interrupt photosync during any phase of
+        synchronization, it will pick up afterwards without re-executing a lot
+        of work, as long as you don't use the --all option.
 
         Usage:
             photosync.py [options]
@@ -362,8 +385,10 @@ class Main(arguments.BaseArguments):
         Options:
             -h --help                   Show this screen
             -d --dir=<dir>              Root directory; where to download photos and store the database.
-            --all                       Synchronize *all* photos instead of just before the oldest/after the newest photo. Needed if you have uploaded photos somewhere in the middle.
+            --all                       Synchronize metadata for *all* photos instead of just before the oldest/after the newest photo. Needed if you have uploaded photos somewhere in the middle. Consider using --dates instead.
             --creds=clientsecret.json   Path to the client credentials JSON file. Defaults to
+            --dates=<dates>             Similar to --all, but only consider photos in the given date range: yyyy-mm-dd:yyyy-mm-dd
+            --query=<item id>           Query metadata for item and print on console.
             --resync                    Check local filesystem for files that should be downloaded but are not there (anymore).
         '''
         super(arguments.BaseArguments, self).__init__(doc=doc)
@@ -376,6 +401,9 @@ class Main(arguments.BaseArguments):
         s = PhotosService(tokens=TokenSource(db=db, clientsecret=self.creds))
         d = Driver(db, s, root=self.dir)
 
+        if self.query:
+            print(s.get_item(self.query))
+            return
         if self.resync:
             if d.find_vanished_items(self.dir):
                 d.download_items()
@@ -383,6 +411,12 @@ class Main(arguments.BaseArguments):
             return
         if self.all:
             d.drive(window_heuristic=False)
+        elif self.dates:
+            (a, b) = self.dates.split(':')
+            p = dateutil.parser.isoparser()
+            (a, b) = p.isoparse(a), p.isoparse(b)
+            window = (a, b)
+            d.drive(window_heuristic=False, date_range=window)
         else:
             d.drive(window_heuristic=True)
 
