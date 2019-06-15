@@ -8,6 +8,9 @@ photosync only ever downloads photos, i.e. the synchronization works from Google
 storage. Don't worry about deleting photos locally; although you have to use the slow `--resync` option (note: not yet
 implemented :) to re-download them.
 
+photosync is fast enough for reasonably large libraries. My library of ~50'000 photos was indexed in roughly an hour;
+the (resumable) download takes another few hours, depending on latency and photo size.
+
 **Pull requests are welcome!**
 
 ## Behavior
