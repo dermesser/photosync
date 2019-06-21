@@ -387,7 +387,7 @@ class Main(arguments.BaseArguments):
             -d --dir=<dir>              Root directory; where to download photos and store the database.
             --all                       Synchronize metadata for *all* photos instead of just before the oldest/after the newest photo. Needed if you have uploaded photos somewhere in the middle. Consider using --dates instead.
             --creds=clientsecret.json   Path to the client credentials JSON file. Defaults to
-            --dates=<dates>             Similar to --all, but only consider photos in the given date range: yyyy-mm-dd:yyyy-mm-dd
+            --dates=<dates>             Similar to --all, but only consider photos in the given date range: yyyy-mm-dd:yyyy-mm-dd or day: yyyy-mm-dd.
             --query=<item id>           Query metadata for item and print on console.
             --resync                    Check local filesystem for files that should be downloaded but are not there (anymore).
         '''
@@ -412,10 +412,19 @@ class Main(arguments.BaseArguments):
         if self.all:
             d.drive(window_heuristic=False)
         elif self.dates:
-            (a, b) = self.dates.split(':')
+            parts = self.dates.split(':')
             p = dateutil.parser.isoparser()
-            (a, b) = p.isoparse(a), p.isoparse(b)
-            window = (a, b)
+            window = None
+            if len(parts) == 2:
+                (a, b) = p
+                (a, b) = p.isoparse(a), p.isoparse(b)
+                window = (a, b)
+            elif len(parts) == 1:
+                date = p.isoparse(parts[0])
+                window = (date, date)
+            else:
+                print("Please use --date with argument yyyy-mm-dd:yyyy-mm-dd (from:to) or yyyy-mm-dd.")
+                return
             d.drive(window_heuristic=False, date_range=window)
         else:
             d.drive(window_heuristic=True)
