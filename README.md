@@ -5,8 +5,7 @@ program downloads all photos from your Google Photos account and organizes them 
 yet, but definitely usable.
 
 photosync only ever downloads photos, i.e. the synchronization works from Google Photos as Source of Truth to your local
-storage. Don't worry about deleting photos locally; although you have to use the slow `--resync` option (note: not yet
-implemented :) to re-download them.
+storage. Don't worry about deleting photos locally; although you have to use the slow `--resync` option to re-download them.
 
 photosync is fast enough for reasonably large libraries. My library of ~50'000 photos was indexed in roughly an hour;
 the (resumable) download takes another few hours, depending on latency and photo size.
