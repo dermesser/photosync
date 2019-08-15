@@ -416,7 +416,7 @@ class Main(arguments.BaseArguments):
             p = dateutil.parser.isoparser()
             window = None
             if len(parts) == 2:
-                (a, b) = p
+                (a, b) = parts
                 (a, b) = p.isoparse(a), p.isoparse(b)
                 window = (a, b)
             elif len(parts) == 1:
