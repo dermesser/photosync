@@ -121,7 +121,7 @@ class PhotosService:
         Returns:
             List of IDs that were successfully downloaded.
         """
-        ids = list(map(lambda i: i[0], items))
+        ids = [i[0] for i in items]
         media_items = self._service.mediaItems().batchGet(mediaItemIds=ids).execute()
         ok = []
         i = -1
@@ -304,7 +304,7 @@ class Driver:
             if len(chunk) > chunksize:
                 ok = self._svc.download_items(chunk)
                 self._db.mark_items_downloaded(ok)
-                wantids = set(map(lambda i: i[0], chunk))
+                wantids = set(i[0] for i in chunk)
                 missing = wantids ^ set(ok)
                 for item in chunk:
                     if item[0] in missing:
