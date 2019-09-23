@@ -47,13 +47,38 @@ Once you have gone through the hassle of obtaining the client secret, you can st
 
 1. Clone this repository to a convenient place: `git clone https://github.com/dermesser/photosync` or `hg clone
    git+https://github.com/dermesser/photosync`.
-1. Install `pipenv`: `pip3 install pipenv` if not yet installed.
-1. Go into the `photosync` repository and run `pipenv install` (make sure that `~/.local/bin/pipenv` is in your `PATH`)
-1. Activate the virtualenv: `pipenv shell` (sigh)
+1. Go into the `photosync` repository and run `python3 setup.py install --user`. This
+   installs dependencies needed by the program.
 1. Run it: `python3 photosync.py --help`
 
 Consult the help text printed by the last command. Usually you will need to set `--dir` so that your photos don't end up
-in the repository.
+in the repository. Typically you would initially run
+
+```
+$ python3 photosync.py --dir=/target/directory [--creds=/path/to/credentials/file]
+```
+
+which also asks you for OAuth credentials etc. After uploading photos (careful:
+Google Photos exposes new media only a few minutes up to half an hour after
+uploading!) you can run the following command, which looks for photos and videos
+that are either older than the oldest known item or newer than the newest known
+item (obviously missing any that have been uploaded with a date between the
+oldest and newest items -- see `--dates` below how to fix it):
+
+```
+$ python3 photosync.py --dir=/target/directory [--creds=...]
+```
+
+If it turns out you are missing some items locally, you can have Google Photos
+checked again for them:
+
+```
+# to check *all* photos available for January 2000:
+$ python3 photosync.py --dir=/target/directory --dates=2000-01-01:2000-02-01 [--creds=...]
+
+# to check *all* photos from *ever*:
+$ python3 photosync.py --dir=/target/directory --all [--creds=...]
+```
 
 ## Troubleshooting
 
