@@ -10,7 +10,7 @@ setup(
         author='Lewin Bormann <lbo@spheniscida.de>',
         author_email='lbo@spheniscida.de',
         license='MIT',
-        py_modules=['photosync'],
+        scripts=['photosync.py'],
         install_requires=[
             'google-api-python-client',
             'google-auth-httplib2',

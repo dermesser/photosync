@@ -386,7 +386,7 @@ class Main(arguments.BaseArguments):
         Options:
             -h --help                   Show this screen
             -d --dir=<dir>              Root directory; where to download photos and store the database.
-            --all                       Synchronize metadata for *all* photos instead of just before the oldest/after the newest photo. Needed if you have uploaded photos somewhere in the middle. Consider using --dates instead.
+            -a --all                    Synchronize metadata for *all* photos instead of just before the oldest/after the newest photo. Needed if you have uploaded photos somewhere in the middle. Consider using --dates instead.
             --creds=clientsecret.json   Path to the client credentials JSON file. Defaults to
             --dates=<dates>             Similar to --all, but only consider photos in the given date range: yyyy-mm-dd:yyyy-mm-dd or day: yyyy-mm-dd.
             --query=<item id>           Query metadata for item and print on console.
