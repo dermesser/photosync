@@ -28,6 +28,10 @@ def log(level, msg, *args):
         msg = msg.format(*args)
     print (level, "::", msg)
 
+def make_date_iso(d):
+    """Expects a date like 2019-1-4 and preprocesses it for ISO parsing.
+    """
+    return '-'.join('{:02d}'.format(int(p)) for p in d.split('-'))
 
 class TokenSource:
     """Return OAuth token for PhotosService to use.
@@ -418,10 +422,11 @@ class Main(arguments.BaseArguments):
             window = None
             if len(parts) == 2:
                 (a, b) = parts
+                (a, b) = (make_date_iso(a), make_date_iso(b))
                 (a, b) = p.isoparse(a), p.isoparse(b)
                 window = (a, b)
             elif len(parts) == 1:
-                date = p.isoparse(parts[0])
+                date = p.isoparse(make_date_iso(parts[0]))
                 window = (date, date)
             else:
                 print("Please use --date with argument yyyy-mm-dd:yyyy-mm-dd (from:to) or yyyy-mm-dd.")
