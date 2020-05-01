@@ -13,6 +13,7 @@ setup(
         scripts=['photosync.py'],
         install_requires=[
             'google-api-python-client',
+            'google-auth',
             'google-auth-httplib2',
             'google-auth-oauthlib',
             'python-dateutil',
