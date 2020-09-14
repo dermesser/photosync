@@ -49,6 +49,8 @@ Once you have gone through the hassle of obtaining the client secret, you can st
    git+https://github.com/dermesser/photosync`.
 1. Go into the `photosync` repository and run `pip[3] install [--user] .`. This
    installs dependencies needed by the program.
+   - Alternatively, build an egg `python setup.py bdist_egg` and install it
+   `easy_install dist/photosync-[version]-py[version].egg`
 1. Run it: `python3 photosync.py --help` or, if you installed it with `pip`,
    `photosync.py --help`.
 
