@@ -7,6 +7,7 @@ verify_ssl = true
 
 [packages]
 google-api-python-client = "*"
+google-api-core = "*"
 google-auth-httplib2 = "*"
 google-auth-oauthlib = "*"
 python-dateutil = "*"
@@ -16,4 +17,4 @@ pyyaml = "*"
 consoleprinter = "*"
 
 [requires]
-python_version = "3.7"
+python_version = "3.8"
