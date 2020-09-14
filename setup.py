@@ -12,13 +12,15 @@ setup(
         license='MIT',
         scripts=['photosync.py'],
         install_requires=[
+            'arguments',
+            'future',
+            'consoleprinter',
+            'google-api-core',
             'google-api-python-client',
             'google-auth',
             'google-auth-httplib2',
             'google-auth-oauthlib',
             'python-dateutil',
-            'arguments',
-            'future',
             'pyyaml',
-            'consoleprinter',
+            'requests-oauthlib',
         ])
