@@ -35,6 +35,7 @@ credentials associated with my account floating around in the wild. Also, the da
 For this,
 
 1. go to https://console.developers.google.com.
+1. Ensure you are on the right project or create a new one
 1. Go to the APIs page and enable the Google Photos API.
 1. Set up the OAuth consent screen (otherwise Google will nag you during credentials creation to do it).
 1. Then go to the *Credentials* page and create a new client ID (type `other`). Download the JSON file using the
@@ -42,6 +43,8 @@ For this,
 1. Save the downloaded JSON file and put it somewhere, for example in your photos directory. Pass the path to the file
    to photosync using the `--creds` argument. By default, photosync will look for a file called `clientsecret.json` in
    the current directory.
+1. After the first run, credentials are cached in the internal SQLite database,
+   meaning you don't have to explicitly specify them on any further invocations.
 
 Once you have gone through the hassle of obtaining the client secret, you can start downloading your photos.
 
@@ -56,33 +59,34 @@ Once you have gone through the hassle of obtaining the client secret, you can st
 1. Run it: `python3 photosync.py --help` or, if you installed it with `pip`,
    `photosync.py --help`.
 
-Consult the help text printed by the last command. Usually you will need to set `--dir` so that your photos don't end up
-in the repository. Typically you would initially run
+Consult the help text printed by the last command. Usually you will need to set
+`--dir` so that your photos don't end up in the current directory. Typically you
+would initially run
 
 ```
-$ python3 photosync.py --dir=/target/directory [--creds=/path/to/credentials/file]
+$ python3 photosync.py --dir=/target/directory --creds=/path/to/clientsecret.json
 ```
 
-which also asks you for OAuth credentials etc. After uploading photos (careful:
-Google Photos exposes new media only a few minutes up to half an hour after
-uploading!) you can run the following command, which looks for photos and videos
-that are either older than the oldest known item or newer than the newest known
-item (obviously missing any that have been uploaded with a date between the
-oldest and newest items -- see `--dates` below how to fix it):
+which also asks you for OAuth authorization. After having uploaded photos
+(careful: Google Photos exposes new media only a few minutes up to half an hour
+ after uploading!) you can run the following command, which looks for photos and
+videos that are either older than the oldest known item or newer than the newest
+known item (obviously missing any that have been uploaded with a date between
+the oldest and newest items: see `--dates` below how to fix it):
 
 ```
-$ python3 photosync.py --dir=/target/directory [--creds=...]
+$ python3 photosync.py --dir=/target/directory
 ```
 
-If it turns out you are missing some items locally, you can have Google Photos
-checked again for them:
+If it turns out you are missing some items locally, you can check Google Photos
+again for them:
 
 ```
 # to check *all* photos available for January 2000:
-$ python3 photosync.py --dir=/target/directory --dates=2000-01-01:2000-02-01 [--creds=...]
+$ python3 photosync.py --dir=/target/directory --dates=2000-01-01:2000-02-01
 
 # to check *all* photos from *ever*:
-$ python3 photosync.py --dir=/target/directory --all [--creds=...]
+$ python3 photosync.py --dir=/target/directory --all
 ```
 
 ## Troubleshooting
