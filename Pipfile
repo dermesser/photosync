@@ -6,10 +6,11 @@ verify_ssl = true
 [dev-packages]
 
 [packages]
-google-api-python-client = "*"
-google-api-core = "*"
+google-api-python-client = "==1.11"
+google-api-core = "==1.26.3"
 google-auth-httplib2 = "*"
 google-auth-oauthlib = "*"
+google-auth = "==1.29"
 python-dateutil = "*"
 arguments = "*"
 future = "*"
