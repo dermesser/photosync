@@ -46,21 +46,23 @@ class TokenSource:
     SCOPES = ['https://www.googleapis.com/auth/photoslibrary']
     CRED_ID = 'installed.main'
 
-    def __init__(self, db=None, tokensfile=None, clientsecret='clientsecret.json'):
+    def __init__(self, db=None, tokensfile=None, clientsecret=None):
         self._db = db
         self._tokensfile = tokensfile
         self._clientsecret = clientsecret
 
     def creds(self):
-        if self._tokensfile and os.path.exists(self._tokensfile):
-            with open(self._tokensfile, 'rb') as f:
-                creds = pickle.load(f)
-                return creds
-        elif self._db:
-            creds = self._db.get_credentials(self.CRED_ID)
-            if creds:
-                creds = pickle.loads(creds)
-                return creds
+        if self._clientsecret is None:
+            if self._tokensfile and os.path.exists(self._tokensfile):
+                with open(self._tokensfile, 'rb') as f:
+                    creds = pickle.load(f)
+                    return creds
+            elif self._db:
+                creds = self._db.get_credentials(self.CRED_ID)
+                if creds:
+                    creds = pickle.loads(creds)
+                    return creds
+        assert self._clientsecret is not None, 'Need --creds to proceed with authorization'
         flow = InstalledAppFlow.from_client_secrets_file(self._clientsecret, self.SCOPES)
         creds = flow.run_local_server()
         if creds and self._tokensfile:
@@ -391,14 +393,14 @@ class Main(arguments.BaseArguments):
             -h --help                   Show this screen
             -d --dir=<dir>              Root directory; where to download photos and store the database.
             -a --all                    Synchronize metadata for *all* photos instead of just before the oldest/after the newest photo. Needed if you have uploaded photos somewhere in the middle. Consider using --dates instead.
-            --creds=clientsecret.json   Path to the client credentials JSON file. Defaults to
+            --creds=<creds>             Path to the client credentials JSON file. Defaults to none. Specify to force reauth. After the first authorization, tokens are saved in the database.
             --dates=<dates>             Similar to --all, but only consider photos in the given date range: yyyy-mm-dd:yyyy-mm-dd or day: yyyy-mm-dd.
             --query=<item id>           Query metadata for item and print on console.
             --resync                    Check local filesystem for files that should be downloaded but are not there (anymore).
         '''
         super(arguments.BaseArguments, self).__init__(doc=doc)
         self.dir = self.dir or '.'
-        self.creds = self.creds or 'clientsecret.json'
+        self.creds = self.creds
 
     def main(self):
         # TODO: --resync, to inspect the local filesystem for vanished files.
